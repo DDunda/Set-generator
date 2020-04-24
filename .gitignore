@@ -1,0 +1,96 @@
+
+.vs/ProjectSettings.json
+.vs/SDL Template/v16/.suo
+.vs/SDL Template/v16/Browse.VC.db
+.vs/SDL Template/v16/ipch/AutoPCH/240471da13ab744c/MAIN.ipch
+.vs/SDL Template/v16/ipch/AutoPCH/6a7126876e28fd4c/MAIN.ipch
+.vs/SDL Template/v16/ipch/AutoPCH/7337a545dd0aa019/KEYBOARDMANAGER.ipch
+.vs/SDL Template/v16/ipch/AutoPCH/79eeb902c431c557/MAIN.ipch
+.vs/SDL Template/v16/ipch/AutoPCH/8496ac0e07c73f25/TIMAMANAGER.ipch
+.vs/SDL Template/v16/ipch/AutoPCH/a9efbe87c6662947/MAIN.ipch
+.vs/SDL Template/v16/ipch/AutoPCH/ad5edb6cbb0e51e1/TIMEMANAGER.ipch
+.vs/SDL Template/v16/Solution.VC.db
+.vs/Set generator/v16/.suo
+.vs/Set generator/v16/Browse.VC.db
+.vs/Set generator/v16/ipch/AutoPCH/641d4fff2c6b0502/MAIN.ipch
+.vs/Set generator/v16/ipch/AutoPCH/6732ddf92fb04c2f/TIMEMANAGER.ipch
+.vs/Set generator/v16/ipch/AutoPCH/6bb19a9f1f5e467f/TIMEMANAGER.ipch
+.vs/Set generator/v16/ipch/AutoPCH/93294db47797cfb2/MAIN.ipch
+.vs/Set generator/v16/ipch/AutoPCH/ac8cfdfcc3141c7/KEYBOARDMANAGER.ipch
+.vs/Set generator/v16/ipch/AutoPCH/ebfdd025b7faf9b2/MAIN.ipch
+.vs/slnx.sqlite
+.vs/VSWorkspaceState.json
+Debug/glew32.dll
+Debug/KeyboardManager.obj
+Debug/libfreetype-6.dll
+Debug/libjpeg-9.dll
+Debug/libpng16-16.dll
+Debug/libtiff-5.dll
+Debug/libwebp-7.dll
+Debug/Main.obj
+Debug/SDL Template.exe
+Debug/SDL Template.ilk
+Debug/SDL Template.pdb
+Debug/SDL Template.tlog/CL.command.1.tlog
+Debug/SDL Template.tlog/CL.read.1.tlog
+Debug/SDL Template.tlog/CL.write.1.tlog
+Debug/SDL Template.tlog/CopyFile.command.1.tlog
+Debug/SDL Template.tlog/CopyFile.read.1.tlog
+Debug/SDL Template.tlog/CopyFile.write.1.tlog
+Debug/SDL Template.tlog/link.command.1.tlog
+Debug/SDL Template.tlog/link.read.1.tlog
+Debug/SDL Template.tlog/link.write.1.tlog
+Debug/SDL Template.tlog/SDL Template.lastbuildstate
+Debug/SDL Tutorial.log
+Debug/SDL2.dll
+Debug/SDL2_image.dll
+Debug/SDL2_ttf.dll
+Debug/Set generator.exe
+Debug/Set generator.ilk
+Debug/Set generator.log
+Debug/Set generator.pdb
+Debug/Set generator.tlog/CL.command.1.tlog
+Debug/Set generator.tlog/CL.read.1.tlog
+Debug/Set generator.tlog/CL.write.1.tlog
+Debug/Set generator.tlog/CopyFile.command.1.tlog
+Debug/Set generator.tlog/CopyFile.read.1.tlog
+Debug/Set generator.tlog/CopyFile.write.1.tlog
+Debug/Set generator.tlog/link.command.1.tlog
+Debug/Set generator.tlog/link.read.1.tlog
+Debug/Set generator.tlog/link.write.1.tlog
+Debug/Set generator.tlog/Set generator.lastbuildstate
+Debug/TimeManager.obj
+Debug/vc142.idb
+Debug/vc142.pdb
+Debug/zlib1.dll
+Release/glew32.dll
+Release/KeyboardManager.obj
+Release/libfreetype-6.dll
+Release/libjpeg-9.dll
+Release/libpng16-16.dll
+Release/libtiff-5.dll
+Release/libwebp-7.dll
+Release/Main.obj
+Release/SDL2.dll
+Release/SDL2_image.dll
+Release/SDL2_ttf.dll
+Release/Set generator.exe
+Release/Set generator.iobj
+Release/Set generator.ipdb
+Release/Set generator.log
+Release/Set generator.pdb
+Release/Set generator.tlog/CL.command.1.tlog
+Release/Set generator.tlog/CL.read.1.tlog
+Release/Set generator.tlog/CL.write.1.tlog
+Release/Set generator.tlog/CopyFile.command.1.tlog
+Release/Set generator.tlog/CopyFile.read.1.tlog
+Release/Set generator.tlog/CopyFile.write.1.tlog
+Release/Set generator.tlog/link.command.1.tlog
+Release/Set generator.tlog/link.delete.1.tlog
+Release/Set generator.tlog/link.read.1.tlog
+Release/Set generator.tlog/link.write.1.tlog
+Release/Set generator.tlog/Set generator.lastbuildstate
+Release/Set generator.tlog/Set generator.write.1u.tlog
+Release/TimeManager.obj
+Release/vc142.pdb
+Release/zlib1.dll
