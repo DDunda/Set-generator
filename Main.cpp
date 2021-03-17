@@ -1,57 +1,28 @@
 #include "config.h"
-
 #include "KeyboardManager.h"
-
 #include "TimeManager.h"
+
+#include <SDL.h>
 
 #include <iostream>
 #include <string>
 #include <math.h>
-#include <map>
-#include <vector>
-
-#include <SDL.h>
-#include <SDL_ttf.h>
-
-#include <GL/glew.h>
-#include <SDL_opengl.h>
-
-#include <SDL_image.h>
 
 #include <thread>
-#include <iostream>
-#include <Windows.h>
-#include <vector>
 #include <atomic>
+#include <mutex>
 
-// A byte
-typedef unsigned char byte_t;
-
-
-// Self expanatory
-const char* windowName = "Buddabrot";
-bool fullscreen = true;
-
-std::atomic<bool> running( true );
-
-// Window and renderer of the main window
-SDL_Window* window = NULL;
-SDL_Renderer* renderer = NULL;
-SDL_Texture* texture;
-void* pixels;
-int pitch;
-
-const SDL_Color colorWhite = { 255, 255, 255 };
-const SDL_Color colorBlack = { 0, 0, 0 };
-TTF_Font* arial;
+#include <map>
+#include <vector>
+#include <queue>
 
 struct coord {
-	long double x, y;
+	float x, y;
 	coord() {
 		x = 0;
 		y = 0;
 	}
-	coord(long double x, long double y) {
+	coord(float x, float y) {
 		this->x = x;
 		this->y = y;
 	}
@@ -60,77 +31,46 @@ struct coord {
 	}
 };
 
-void DisplayMessage(std::string message, TTF_Font* font, int x, int y) {
+struct colour {
+	union {
+		Uint32 buf;
+		struct {
+			char r, g, b, a;
+		};
+	};
+};
 
-	SDL_Surface* surface = TTF_RenderText_Blended(font, message.c_str(), colorWhite);
-	SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+// Self expanatory
+const char* windowName = "Buddabrot";
+bool fullscreen = true;
+bool hasFocus = true;
+unsigned long threshold = 0;
 
-	int w;
-	int h;
+std::atomic<bool> running(true);
 
-	SDL_QueryTexture(texture, NULL, NULL, &w, &h);
-	SDL_Rect locatingRect = { x, y, w, h };
+// Window and renderer of the main window
+SDL_Window* window = NULL;
+SDL_Renderer* renderer = NULL;
+SDL_Texture* texture;
+void* pixels;
+int pitch;
 
-	SDL_RenderCopy(renderer, texture, NULL, &locatingRect);
+// Stuff about the fractal
+unsigned long* densityMap;
+unsigned long maxVal = 0;
 
-	SDL_DestroyTexture(texture);
-	SDL_FreeSurface(surface);
-}
+// Stuff for the rendering threads
+int threads = 0;
+bool rendering;
 
-int InitImageLibraries() {
-	int error = 0;
+// Used fot limiting access to jobs and updating the density map
+std::mutex joblock, updateblock;
 
-	if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
-		std::cout << "Failed to initialise SDL_image for PNG files. Error code: " << IMG_GetError() << std::endl;
-		error -= 1;
-	}
+// Jobs for render threads
+std::queue<coord> jobs;
 
-	if (!(IMG_Init(IMG_INIT_JPG) & IMG_INIT_JPG)) {
-		std::cout << "Failed to initialise SDL_image for JPG files. Error code: " << IMG_GetError() << std::endl;
-		error -= 2;
-	}
-
-	if (!(IMG_Init(IMG_INIT_TIF) & IMG_INIT_TIF)) {
-		std::cout << "Failed to initialise SDL_image for TIF files. Error code: " << IMG_GetError() << std::endl;
-		error -= 4;
-	}
-
-	if (!(IMG_Init(IMG_INIT_WEBP) & IMG_INIT_WEBP)) {
-		std::cout << "Failed to initialise SDL_image for WEBP files. Error code: " << IMG_GetError() << std::endl;
-		error -= 8;
-	}
-
-	if (TTF_Init() == 0) {
-		arial = TTF_OpenFont("arial.ttf", 15);
-	}
-	else {
-		std::cout << "Failed to initialise SDL_ttf. Error code: " << TTF_GetError() << std::endl;
-		error -= 16;
-	}
-
-	return error;
-}
-
-int LoadImage(SDL_Surface*& surface, const char* path) {
-
-	surface = IMG_Load(path);
-
-	if (surface == NULL) {
-		std::cout << "SDL could not load " << path << " (image). Error code: " << SDL_GetError() << std::endl;
-		return -1;
-	}
-
-	return 0;
-}
-
-int BlitImage(SDL_Surface* surface, SDL_Surface* image, unsigned int x, unsigned int y) {
-	SDL_Rect pos;
-	pos.x = x;
-	pos.y = y;
-	SDL_BlitSurface(image, NULL, surface, &pos);
-
-	return 0;
-}
+// Whether the render has finished (So the rendering threads know to stop)
+bool renderFinished = false;
 
 void ToggleFullscreen() {
 	SDL_SetWindowFullscreen(window, fullscreen ? 0 : SDL_WINDOW_FULLSCREEN);
@@ -149,10 +89,42 @@ void HandleEvents() {
 	while (SDL_PollEvent(&event)) {
 		switch (event.type)
 		{
-		case SDL_QUIT:
-			running = false;
+		case SDL_WINDOWEVENT:
+			switch (event.window.event) {
+			case SDL_WINDOWEVENT_FOCUS_GAINED:
+				hasFocus = true;
+				break;
+			case SDL_WINDOWEVENT_FOCUS_LOST:
+				hasFocus = false;
+				break;
+			default:
+				break;
+			}
 			break;
-
+		case SDL_QUIT:
+			running.store(false);
+			break;
+		case SDL_MOUSEWHEEL:
+			if (-event.wheel.y < 0) {
+				if (event.wheel.y >= threshold) {
+					threshold = 1;
+				}
+				else {
+					threshold -= event.wheel.y;
+				}
+			}
+			else if (-event.wheel.y > 0) {
+				if (threshold - event.wheel.y <= threshold
+					||
+					threshold - event.wheel.y > maxVal
+					) {
+					threshold = maxVal;
+				}
+				else {
+					threshold -= event.wheel.y;
+				}
+			}
+			break;
 #ifdef KEYBOARD_MANAGED
 		case SDL_KEYDOWN:
 			KeyDown(event.key);
@@ -161,79 +133,17 @@ void HandleEvents() {
 			KeyUp(event.key);
 			break;
 #endif
-
 		}
 	}
 }
 
-void DrawFilledCircle(int cx, int cy, int r, SDL_Color& line, SDL_Color& fill) {
-	int x = r;
-	int y = 0;
-	while (x >= y) {
-		SDL_SetRenderDrawColor(renderer, line.r, line.g, line.b, line.b);
-		SDL_RenderDrawPoint(renderer, cx + x, cy + y);
-		SDL_RenderDrawPoint(renderer, cx - x, cy + y);
-		SDL_RenderDrawPoint(renderer, cx + x, cy - y);
-		SDL_RenderDrawPoint(renderer, cx - x, cy - y);
-		SDL_RenderDrawPoint(renderer, cx + y, cy + x);
-		SDL_RenderDrawPoint(renderer, cx - y, cy + x);
-		SDL_RenderDrawPoint(renderer, cx + y, cy - x);
-		SDL_RenderDrawPoint(renderer, cx - y, cy - x);
-
-		SDL_SetRenderDrawColor(renderer, fill.r, fill.g, fill.b, fill.b);
-		SDL_RenderDrawLine(renderer, cx + x - 1, cy + y, cx - x + 1, cy + y);
-		SDL_RenderDrawLine(renderer, cx + x - 1, cy - y, cx - x + 1, cy - y);
-		SDL_RenderDrawLine(renderer, cx + y, cy + x - 1, cx + y, cy - x + 1);
-		SDL_RenderDrawLine(renderer, cx - y, cy + x - 1, cx - y, cy - x + 1);
-
-		y++;
-		int tx = x - 1;
-		if (abs(((tx * tx) + y * y) - r * r) < abs(((x * x) + y * y) - r * r)) {
-			x = tx;
-		}
-	}
-}
-
-void DrawCircle(int cx, int cy, int r, SDL_Color& line) {
-	int x = r;
-	int y = 0;
-	SDL_SetRenderDrawColor(renderer, line.r, line.g, line.b, line.b);
-	while (x >= y) {
-		SDL_RenderDrawPoint(renderer, cx + x, cy + y);
-		SDL_RenderDrawPoint(renderer, cx - x, cy + y);
-		SDL_RenderDrawPoint(renderer, cx + x, cy - y);
-		SDL_RenderDrawPoint(renderer, cx - x, cy - y);
-		SDL_RenderDrawPoint(renderer, cx + y, cy + x);
-		SDL_RenderDrawPoint(renderer, cx - y, cy + x);
-		SDL_RenderDrawPoint(renderer, cx + y, cy - x);
-		SDL_RenderDrawPoint(renderer, cx - y, cy - x);
-
-		y++;
-		int tx = x - 1;
-		if (abs(((tx * tx) + y * y) - r * r) < abs(((x * x) + y * y) - r * r)) {
-			x = tx;
-		}
-	}
-}
-
-void Reverse_endianness(byte_t* bytes, size_t byteLength) {
-	size_t cap = byteLength >> 1;
-	for (byte_t i = 0; i < cap; i++) {
-		bytes[i] ^= bytes[byteLength - 1 - i];
-		bytes[byteLength - 1 - i] ^= bytes[i];
-		bytes[i] ^= bytes[byteLength - 1 - i];
-	}
-}
-
-void SetColour(long double val, Uint32* location) {
+void SetColour(unsigned char lum, colour* location) {
 #if COLOUR_TYPE == GREYSCALE
-	// AARRGGBB
-	unsigned char lum = (unsigned char)(val * 255);
-	*location = 0xFF000000;
-	*location |= lum << 8;
-	*location |= lum;
-	*location |= lum << 16;
-	
+	//location->a = 255;
+	location->r = lum;
+	location->g = lum;
+	location->b = lum;
+
 #elif COLOUR_TYPE == GREEN
 	// AARRGGBB
 	if (val <= 0) *location = 0xFF000000;
@@ -260,8 +170,8 @@ void SetColour(long double val, Uint32* location) {
 		*location |= blue << 16;
 	}
 #elif COLOUR_TYPE == BANDED
-	long double tmp = 1.0L;
-	unsigned char lum = (unsigned char)(modfl(val * 10.0L,&tmp) * 255);
+	float tmp = 1.0L;
+	unsigned char lum = (unsigned char)(modfl(val * 10.0L, &tmp) * 255);
 	*location = 0xFF000000 | (lum << 16) | (lum << 8) | lum;
 #elif COLOUR_TYPE == GOLD
 	// AARRGGBB
@@ -287,47 +197,39 @@ void SetColour(long double val, Uint32* location) {
 #endif
 }
 
+void FromScreenToGlobal(coord& current) {
+#ifdef SAMPLE_RADIUS_X
+	current.x *= SAMPLE_RADIUS_X;
+#endif
+#ifdef SAMPLE_RADIUS_Y
+	current.y *= SAMPLE_RADIUS_Y;
+#endif
 
-coord FromScreenToGlobal(const coord& current) {
-	coord out = coord::copy(current);
-
-	out.x /= ((long double)WIDTH);
-	out.y /= ((long double)HEIGHT);
-
-	out.x *= 2.0;
-	out.y *= 2.0;
-
-	out.x -= 1;
-	out.y -= 1;
-
-	out.x *= CAMERA_RADIUS;
-	out.y *= CAMERA_RADIUS;
-	out.y *= Y_RATIO_CORRECTION;
-
-#ifdef SAMPLING
-	out.x *= SAMPLE_RADIUS_X;
-	out.y *= SAMPLE_RADIUS_Y;
-
-	out.x += SAMPLE_OFFSET_X;
-	out.y += SAMPLE_OFFSET_Y;
-
-#endif // SAMPLING
-
-	out.x += CAMERA_OFFSET_X;
-	out.y += CAMERA_OFFSET_Y;
-
-	return out;
+#ifdef SAMPLE_OFFSET_X
+	current.x += SAMPLE_OFFSET_X;
+#endif
+#ifdef SAMPLE_OFFSET_Y
+	current.y += SAMPLE_OFFSET_Y;
+#endif
 }
 
 coord ToScreen(const coord& current) {
 	coord out = coord::copy(current);
 
+#ifdef CAMERA_OFFSET_X
 	out.x -= CAMERA_OFFSET_X;
+#endif
+#ifdef CAMERA_OFFSET_Y
 	out.y -= CAMERA_OFFSET_Y;
+#endif
 
+#ifdef Y_RATIO_CORRECTION
+	out.y /= Y_RATIO_CORRECTION;
+#endif
+#ifdef CAMERA_RADIUS
 	out.x /= CAMERA_RADIUS;
 	out.y /= CAMERA_RADIUS;
-	out.y /= Y_RATIO_CORRECTION;
+#endif
 
 	out.x += 1;
 	out.y += 1;
@@ -335,24 +237,14 @@ coord ToScreen(const coord& current) {
 	out.x *= 0.5L;
 	out.y *= 0.5L;
 
-	out.x *= ((long double)WIDTH);
-	out.y *= ((long double)HEIGHT);
+	out.x *= ((int)WIDTH);
+	out.y *= ((int)HEIGHT);
 
-	out.x = round(out.x);
-	out.y = round(out.y);
+	//out.x = round(out.x);
+	//out.y = round(out.y);
 
 	return out;
 }
-
-double* densityMap;
-double maxVal = 0;
-
-int threads = 0;
-bool rendering;
-
-int a = 0;
-int b = 0;
-int g;
 
 void CloseLoop() {
 	SDL_RenderPresent(renderer);
@@ -361,128 +253,203 @@ void CloseLoop() {
 #endif
 }
 
-void RenderSet(int yMin, int yMax) {
+void RenderingThread() {
+#if PLOT_TYPE == ESCAPING_BUDDHA
+	coord* iters = new coord[MAX_PATH_LENGTH];
+#endif
 	threads++;
-	std::vector<coord> iters(MAX_PATH_LENGTH);
 
-#if SAMPLE_MULT == 1
-	for (int y = 0; y < HEIGHT; y++) {
-		for (int x = 0; x < WIDTH; x++) {
-			coord tmpSample(x, y);
-#else
-	for (int y = yMin; y < yMax; y++) {
-		for (int x = 0; x < WIDTH * SAMPLE_MULT; x++) {
-			coord tmpSample(x / (long double)SAMPLE_MULT, y / (long double)SAMPLE_MULT);
+	std::queue<coord> private_jobs;
+
+	while (running.load()) {
+		if (private_jobs.size() == 0) {
+			while (1) {
+				if (jobs.size() > 0) {
+					joblock.lock();
+					if (jobs.size() > 0) break;
+					else joblock.unlock();
+				}
+				if (renderFinished) {
+#if PLOT_TYPE == ESCAPING_BUDDHA
+					delete[] iters;
 #endif
-			coord tmp = FromScreenToGlobal(tmpSample);
-			coord tmporigin = coord::copy(tmp);
+					threads--;
+					return;
+				}
+			}
+			for (; private_jobs.size() < 4 && jobs.size() > 0;) {
+				private_jobs.push(jobs.front());
+				jobs.pop();
+			}
+			joblock.unlock();
+		}
 
-			int escapes = 0;
+		coord tmpSample = private_jobs.front();
+		private_jobs.pop();
 
-			iters.clear();
-			int i = 0;
+		coord tmp = tmpSample;
+		FromScreenToGlobal(tmp);
+		coord tmporigin = tmp;
 
-#if MAX_ESCAPES == 1
-			for (; escapes == 0 && i < MAX_PATH_LENGTH; i++) {
-#else
-			for (; escapes < MAX_ESCAPES && i < MAX_PATH_LENGTH; i++) {
-#endif
+		int escapes = 0;
+		int i = 0;
 
 #if PLOT_TYPE == JULIA
-				long double tx2 = tmp.x * tmp.x - tmp.y * tmp.y + JULIA_X,
+		coord location = ToScreen(tmporigin);
+		if (location.x >= 0 && location.y >= 0 && location.x < WIDTH && location.y < HEIGHT) {
+			for (; i < MAX_PATH_LENGTH; ++i) {
+				float tx2 = tmp.x * tmp.x - tmp.y * tmp.y + JULIA_X,
 					ty2 = 2 * tmp.x * tmp.y + JULIA_Y;
 				tmp.x = tx2;
 				tmp.y = ty2;
-				if (tmp.x * tmp.x + tmp.y * tmp.y > SQR_ESCAPE_RADIUS) escapes++;
+				if (tmp.x * tmp.x + tmp.y * tmp.y > SQR_ESCAPE_RADIUS) {
+					escapes++;
+					if (escapes == MAX_ESCAPES) break;
+				}
 			}
-			double* base = densityMap
-				+ (int)(tmpSample.x)
-				+ WIDTH * (int)(tmpSample.y);
+			unsigned long* base = densityMap
+				+ (int)(location.x)
+				+ WIDTH * (int)(location.y);
+			updateblock.lock();
 			if (i != MAX_PATH_LENGTH) {
-				(*base) = i;
-				if (*base > maxVal) maxVal++;
+				if (*base == maxVal) maxVal += i;
+				*base += i;
 			}
+			updateblock.unlock();
+		}
 #elif PLOT_TYPE == ESCAPING_BUDDHA
-				long double tx2 = tmp.x * tmp.x - tmp.y * tmp.y + tmporigin.x,
-					ty2 = 2 * tmp.x * tmp.y + tmporigin.y;
-				tmp.x = tx2;
-				tmp.y = ty2;
-				coord scrtmp = ToScreen(tmp);
-				if (tmp.x * tmp.x + tmp.y * tmp.y > SQR_ESCAPE_RADIUS) escapes++;
-				else if (scrtmp.x >= 0 && scrtmp.y >= 0 && scrtmp.x < WIDTH && scrtmp.y < HEIGHT) iters.push_back(scrtmp);
-			}
-
-			if (escapes >= MAX_ESCAPES) {
-				for (int j = 0; j < iters.size(); j++) {
-					int x = (int)iters[j].x;
-					int y = (int)iters[j].y;
-					double fx = iters[j].x - x;
-					double fy = iters[j].y - y;
-
-					double* base = densityMap
-						+ x
-						+ WIDTH * y;
-
-					if (y >= 0 && y < HEIGHT) {
-						if (x >= 0 && x < WIDTH) {
-							*(base) += (1 - fx) * (1 - fy);
-							if (*(base) > maxVal) maxVal = *(base);
-						}
-						if (x >= -1 && x < WIDTH - 1) {
-							*(base + 1) += (fx) * (1 - fy);
-							if (*(base + 1) > maxVal) maxVal = *(base + 1);
-						}
+		coord* itersHead = iters;
+		float tx2, ty2;
+		for (; i < MAX_PATH_LENGTH; ++i) {
+			tx2 = tmp.x * tmp.x - tmp.y * tmp.y + tmporigin.x;
+			tmp.y = 2 * tmp.x * tmp.y + tmporigin.y;
+			tmp.x = tx2;
+			coord scrtmp = ToScreen(tmp);
+			if (tmp.x * tmp.x + tmp.y * tmp.y > SQR_ESCAPE_RADIUS) {
+				++escapes;
+				if (escapes == MAX_ESCAPES) {
+					updateblock.lock();
+					for (coord* j = iters; j != itersHead; ++j) {
+						unsigned long* base = densityMap + (int)j->x + (int)j->y * WIDTH;
+						if (*base == maxVal) ++maxVal;
+						++(*base);
 					}
-					if (y >= -1 && y < HEIGHT - 1) {
-						if (x >= 0 && x < WIDTH) {
-							*(base + WIDTH) += (1 - fx) * (fy);
-							if (*(base + WIDTH) > maxVal) maxVal = *(base + WIDTH);
-						}
-						if (x >= -1 && x < WIDTH - 1) {
-							*(base + WIDTH + 1) += (fx) * (fy);
-							if (*(base + WIDTH + 1) > maxVal) maxVal = *(base + WIDTH + 1);
-						}
-					}
+					updateblock.unlock();
+					break;
 				}
 			}
+			else if (scrtmp.x >= 0 && scrtmp.y >= 0 && scrtmp.x < WIDTH && scrtmp.y < HEIGHT) {
+				*(itersHead++) = scrtmp;
+			}
+		}
 #elif PLOT_TYPE == FULL_BUDDHA
-				long double tx2 = tmp.x * tmp.x - tmp.y * tmp.y + tmporigin.x,
-					ty2 = 2 * tmp.x * tmp.y + tmporigin.y;
-				tmp.x = tx2;
-				tmp.y = ty2;
-				coord scrtmp = ToScreen(tmp);
-				if (tmp.x * tmp.x + tmp.y * tmp.y > SQR_ESCAPE_RADIUS) escapes++;
-				else if (scrtmp.x >= 0 && scrtmp.y >= 0 && scrtmp.x < WIDTH && scrtmp.y < HEIGHT) {
-					Uint16* base = densityMap
-						+ (int)(floor(scrtmp.x))
-						+ WIDTH * (int)(floor(scrtmp.y));
-					(*base)++;
-					if (*base > maxVal) maxVal++;
-					escapes = 0;
-				}
-		    }
-#elif PLOT_TYPE == MANDELBROT
-				long double tx2 = tmp.x * tmp.x - tmp.y * tmp.y + tmporigin.x,
-					ty2 = 2 * tmp.x * tmp.y + tmporigin.y;
-				tmp.x = tx2;
-				tmp.y = ty2;
-				if (tmp.x * tmp.x + tmp.y * tmp.y > SQR_ESCAPE_RADIUS) escapes++;
-	        }
+		float tx2 = tmp.x * tmp.x - tmp.y * tmp.y + tmporigin.x,
+			ty2 = 2 * tmp.x * tmp.y + tmporigin.y;
+		tmp.x = tx2;
+		tmp.y = ty2;
+		coord scrtmp = ToScreen(tmp);
+		if (tmp.x * tmp.x + tmp.y * tmp.y > SQR_ESCAPE_RADIUS) escapes++;
+		else if (scrtmp.x >= 0 && scrtmp.y >= 0 && scrtmp.x < WIDTH && scrtmp.y < HEIGHT) {
 			Uint16* base = densityMap
-				+ (int)(floor(tmpSample.x / (long double)SAMPLE_MULT))
-				+ WIDTH * (int)(floor(tmpSample.y / (long double)SAMPLE_MULT));
-			(*base) += i;
+				+ (int)(floor(scrtmp.x))
+				+ WIDTH * (int)(floor(scrtmp.y));
+			(*base)++;
 			if (*base > maxVal) maxVal++;
-
+			escapes = 0;
+		}
+	}
+#elif PLOT_TYPE == MANDELBROT
+		float tx2 = tmp.x * tmp.x - tmp.y * tmp.y + tmporigin.x,
+			ty2 = 2 * tmp.x * tmp.y + tmporigin.y;
+		tmp.x = tx2;
+		tmp.y = ty2;
+		if (tmp.x * tmp.x + tmp.y * tmp.y > SQR_ESCAPE_RADIUS) escapes++;
+}
+#ifdef SAMPLE_MULT
+	Uint16* base = densityMap
+		+ (int)(floor(tmpSample.x / (float)SAMPLE_MULT))
+		+ WIDTH * (int)(floor(tmpSample.y / (float)SAMPLE_MULT));
 #else
-		    }
+	Uint16* base = densityMap
+		+ (int)floor(tmpSample.x)
+		+ WIDTH * (int)floor(tmpSample.y);
 #endif
-			if (running.load() == false) {
-				threads--;
-				return;
+	(*base) += i;
+	if (*base > maxVal) maxVal++;
+#elif PLOT_TYPE == DEBUG
+		coord scrtmp = ToScreen(tmporigin);
+		int x = round(scrtmp.x);
+		int y = round(scrtmp.y);
+		//double fx = iters[j].x - x;
+		//double fy = iters[j].y - y;
+
+		unsigned long* base = densityMap + x + y * WIDTH;
+		updateblock.lock();
+		if (y >= 0 && y < HEIGHT) {
+			if (x >= 0 && x < WIDTH) {
+				if (*base == maxVal) ++maxVal;
+				(*base)++;
+			}
+		}
+		updateblock.unlock();
+#endif
+	}
+#if PLOT_TYPE == ESCAPING_BUDDHA
+delete[] iters;
+#endif
+threads--;
+}
+
+void RenderSet() {
+	threads++;
+
+	renderFinished = false;
+
+	int z = 8;
+	std::vector<std::thread> workers(z);
+	for (int i = 0; i < z; ++i) workers[i] = std::thread(RenderingThread);
+
+	joblock.lock();
+	int generate_jobs = z * 5;
+
+	for (int y = 0; y < SAMPLE_COUNT_Y; ++y) {
+		for (int x = 0; x < SAMPLE_COUNT_X; ++x) {
+			coord tmpSample(x, y);
+			tmpSample.x /= (float)SAMPLE_COUNT_X*0.5;
+			tmpSample.y /= (float)SAMPLE_COUNT_Y*0.5;
+
+			tmpSample.x -= 1;
+			tmpSample.y -= 1;
+
+			jobs.push(tmpSample);
+			--generate_jobs;
+			if (generate_jobs == 0) {
+				joblock.unlock();
+				while (jobs.size() > z) {
+					if (!running.load()) {
+						renderFinished = true;
+						for (int i = 0; i < z; ++i) workers[i].join();
+						threads--;
+						return;
+					}
+				}
+				joblock.lock();
+				generate_jobs = z * 5 - jobs.size();
 			}
 		}
 	}
+	joblock.unlock();
+	while (jobs.size() > 0) {
+		if (!running.load()) {
+			renderFinished = true;
+			break;
+		}
+	}
+
+	renderFinished = true;
+
+	for (int i = 0; i < z; ++i) workers[i].join();
+
 	threads--;
 	return;
 }
@@ -495,13 +462,7 @@ void OpenLoop() {
 }
 
 int GameLoop() {
-	running.store(true);
-	std::vector<std::thread> threads;
-	int totalHeight = HEIGHT * SAMPLE_MULT;
-	int z = 16;
-	for (int i = 0; i < z; i++) {
-		threads.push_back(std::thread(RenderSet, i * totalHeight / z, (i + 1) * totalHeight / z));
-	}
+	std::thread renderThread = std::thread(RenderSet);
 
 	while (running.load()) {
 		OpenLoop();
@@ -509,29 +470,33 @@ int GameLoop() {
 		SDL_LockTexture(texture, NULL, &pixels, &pitch);
 
 #if SCALING_TYPE == LOGARITHMIC
-		long double invMaxVal = 9.0L / (long double)(maxVal);
+		float invMaxVal = 9.0L / (float)(maxVal);
 #else
-		long double invMaxVal = 1.0L / (long double)(maxVal);
+		if (threshold == 0) threshold = maxVal;
+		float invMaxVal = 255.0L / (float)threshold;
+		//float invMaxVal = 255.0L / (float)(maxVal);
 #endif
+		colour* base = (colour*)pixels;
+		unsigned long* src = densityMap;
 
-		Uint32* base = (Uint32*)pixels;
-		double* src = densityMap;
-
-		for (int y = 0; y < HEIGHT; y++) {
-			for (int x = 0; x < WIDTH; x++) {
+		if (hasFocus) {
+			for (int y = 0; y < HEIGHT; y++) {
+				for (int x = 0; x < WIDTH; x++) {
 #if SCALING_TYPE == LOGARITHMIC
-				long double lum = log10((long double)(*src) * invMaxVal + 1);
+					float lum = 255.0 * log10((float)(*src) * invMaxVal + 1);
 #elif SCALING_TYPE == SQR
-				long double lum = ((long double)(*src) * invMaxVal);
-				lum *= lum;
+					float lum = ((float)(*src) * invMaxVal);
+					lum *= lum;
 #elif SCALING_TYPE == SQRT
-				long double lum = sqrtl((long double)(*src) * invMaxVal);
+					float lum = sqrtl((float)(*src) * invMaxVal);
 #elif SCALING_TYPE == NORMAL
-				long double lum = ((long double)(*src) * invMaxVal);
+					float lum = (*src * invMaxVal);
 #endif
-				SetColour(lum, base);
-				base++;
-				src++;
+					lum = lum > 255 ? 255 : lum;
+					SetColour(lum, base);
+					++base;
+					++src;
+				}
 			}
 		}
 		SDL_UnlockTexture(texture);
@@ -546,9 +511,7 @@ int GameLoop() {
 		CloseLoop();
 	}
 
-	for (int i = 0; i < z; i++) {
-		threads[i].join();
-	}
+	renderThread.join();
 
 	return 0;
 }
@@ -557,28 +520,28 @@ int main(int argc, char* argv[]) {
 
 	if (SDL_Init(SDL_INIT_EVERYTHING) == 0) {
 		int winFlags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE;
-		//if (fullscreen) winFlags |= SDL_WINDOW_FULLSCREEN;
+		if (fullscreen) winFlags |= SDL_WINDOW_FULLSCREEN;
 
-		if (InitImageLibraries() == 0) {
-			if (SDL_CreateWindowAndRenderer(WIDTH, HEIGHT, winFlags, &window, &renderer) == 0) {
-				SDL_SetWindowTitle(window, windowName);
+		if (SDL_CreateWindowAndRenderer(WIDTH, HEIGHT, winFlags, &window, &renderer) == 0) {
+			SDL_SetWindowTitle(window, windowName);
 
-				texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
+			texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
 
-				densityMap = new double[WIDTH * HEIGHT]();
-				GameLoop();
-				delete[] densityMap;
-				SDL_DestroyTexture(texture);
+			running.store(true);
 
-				SDL_DestroyRenderer(renderer);
-				SDL_DestroyWindow(window);
-			}
-			else {
-				std::cout << "Could not create window! Error code: " << SDL_GetError() << std::endl;
-				return EXIT_FAILURE;
-			}
-			TTF_Quit();
+			densityMap = new unsigned long[WIDTH * HEIGHT]();
+			GameLoop();
+			delete[] densityMap;
+			SDL_DestroyTexture(texture);
+
+			SDL_DestroyRenderer(renderer);
+			SDL_DestroyWindow(window);
 		}
+		else {
+			std::cout << "Could not create window! Error code: " << SDL_GetError() << std::endl;
+			return EXIT_FAILURE;
+		}
+
 		SDL_Quit();
 	}
 	else {
